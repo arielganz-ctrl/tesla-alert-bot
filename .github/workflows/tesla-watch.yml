@@ -1,9 +1,9 @@
 name: Tesla Inventory Watch
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: "*/10 * * * *"
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -23,8 +23,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-  pip install requests playwright
-  playwright install chromium
+          pip install requests playwright
+          playwright install chromium
 
       - name: Check Tesla page
         env:

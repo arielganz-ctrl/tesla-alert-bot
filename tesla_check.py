@@ -5,7 +5,7 @@ import requests
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
-TESLA_URL = "https://www.tesla.com/he_IL/inventory/new/my?PaymentType=cash"
+TESLA_URL = "https://www.tesla.com/he_IL/inventory/new/my?TRIM=MY&PaymentType=cash"
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 SEEN_FILE = Path("seen_tesla.json")

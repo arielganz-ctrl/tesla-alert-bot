@@ -1,31 +1,15 @@
 import os
 import json
 import hashlib
-import urllib.parse
 import requests
 from pathlib import Path
+from playwright.sync_api import sync_playwright
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
+
+TESLA_URL = "https://www.tesla.com/he_IL/inventory/new/my?TRIM=MY&PaymentType=cash"
 SEEN_FILE = Path("seen_tesla.json")
-
-SEARCH_URL = "https://www.tesla.com/inventory/api/v4/inventory-results"
-
-QUERY = {
-    "query": {
-        "model": "my",
-        "condition": "new",
-        "market": "IL",
-        "language": "he",
-        "super_region": "europe",
-        "arrangeby": "Price",
-        "order": "asc"
-    },
-    "offset": 0,
-    "count": 50,
-    "outsideOffset": 0,
-    "outsideSearch": False
-}
 
 
 def send_telegram(text):
@@ -42,27 +26,16 @@ def load_seen():
 
 
 def save_seen(seen):
-    SEEN_FILE.write_text(json.dumps(sorted(seen), ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def fetch_inventory():
-    params = {"query": json.dumps(QUERY, separators=(",", ":"))}
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json"
-    }
-
-    r = requests.get(SEARCH_URL, params=params, headers=headers, timeout=30)
-    print("Tesla status:", r.status_code)
-    print(r.text[:500])
-    r.raise_for_status()
-
-    data = r.json()
-    return data.get("results", [])
+    SEEN_FILE.write_text(
+        json.dumps(sorted(seen), ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
 
 
 def car_id(car):
-    return car.get("VIN") or hashlib.sha256(json.dumps(car, sort_keys=True).encode()).hexdigest()
+    return car.get("VIN") or hashlib.sha256(
+        json.dumps(car, sort_keys=True).encode()
+    ).hexdigest()
 
 
 def describe_car(car):
@@ -71,28 +44,66 @@ def describe_car(car):
     trim = car.get("TrimName") or car.get("TRIM") or ""
     paint = car.get("PAINT") or ""
     wheels = car.get("WHEELS") or ""
-    odometer = car.get("Odometer") or ""
 
     return (
-        "🚗 Model Y חדש במלאי!\n\n"
+        "🚗 Model Y חדש הופיע במלאי Tesla Israel!\n\n"
         f"VIN: {vin}\n"
         f"מחיר: {price}\n"
-        f"דגם/רמת גימור: {trim}\n"
+        f"דגם: {trim}\n"
         f"צבע: {paint}\n"
-        f"ג׳אנטים: {wheels}\n"
-        f"ק״מ: {odometer}\n\n"
-        "https://www.tesla.com/he_IL/inventory/new/my?TRIM=MY&PaymentType=cash"
+        f"ג׳אנטים: {wheels}\n\n"
+        f"{TESLA_URL}"
     )
 
 
+def fetch_inventory_from_browser():
+    inventory_data = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(
+            locale="he-IL",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+        )
+
+        def handle_response(response):
+            nonlocal inventory_data
+            if "inventory-results" in response.url:
+                try:
+                    data = response.json()
+                    results = data.get("results", [])
+                    if results:
+                        inventory_data = results
+                        print(f"Found inventory API response: {len(results)} cars")
+                except Exception as e:
+                    print("Could not parse inventory response:", e)
+
+        page.on("response", handle_response)
+
+        page.goto(TESLA_URL, wait_until="networkidle", timeout=90000)
+        page.wait_for_timeout(10000)
+
+        browser.close()
+
+    return inventory_data
+
+
 def main():
-    cars = fetch_inventory()
+    cars = fetch_inventory_from_browser()
+
+    if not cars:
+        send_telegram(
+            "⚠️ Tesla Watch רץ, אבל לא הצליח לקרוא רכבי Model Y מהמלאי.\n"
+            "יכול להיות שטסלה חסמה זמנית את GitHub או ששינתה את האתר."
+        )
+        return
+
     current_ids = {car_id(car): car for car in cars}
     seen = load_seen()
 
     if not seen:
         save_seen(set(current_ids.keys()))
-        send_telegram(f"✅ Tesla Model Y Watch started.\nכרגע נמצאו {len(cars)} רכבים במלאי.")
+        send_telegram(f"✅ Tesla Model Y Watch started.\nכרגע נמצאו {len(cars)} רכבי Model Y במלאי.")
         return
 
     new_ids = set(current_ids.keys()) - seen
